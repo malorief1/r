@@ -1,0 +1,305 @@
+---
+title: "MassGeneral"
+author: "Malorie Kasparian"
+date: "12/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(warn=-1, message=FALSE)
+```
+
+```{r, message=FALSE}
+library("readxl")
+library("DT")
+library("plotrix")
+library('dplyr')
+
+# read in data
+data <- read_excel("/Users/Mal/Downloads/trialdata.xlsx")
+```
+
+```{r}
+# function to find the mode
+getmode <- function(x) {
+   uniqv <- unique(x)
+   uniqv[which.max(tabulate(match(x, uniqv)))]
+}
+
+# change group to dummy variable
+data$grouptype <- ifelse(data$group=='active', 1,
+                         ifelse(data$group=='placebo', 0,
+                                2))
+
+# make categorical data into factor datatype
+data$id <- as.factor(data$id)
+data$female <- as.factor(data$female)
+data$grouptype <- as.factor(data$grouptype)
+```
+
+
+<font size="6"> Analysis: </font> 
+
+<font size="5"> 1) General summary of data at baseline </font> 
+
+```{r}
+# create baseline data
+baseline <- data.frame(data %>% filter(month==0))
+# dataframe baseline has 400 obs, each showing data for the individual 'baseline' visit
+
+
+baseline_sum <- data.frame("Mean" = c(mean(baseline$age), mean(baseline$memory), mean(baseline$ADAS11)),
+                           "Median" = c(median(baseline$age), median(baseline$memory), median(baseline$ADAS11)),
+                           "Mode" = c(getmode(baseline$age), getmode(baseline$memory), getmode(baseline$ADAS11)),
+                           "Std Dev" = c(sd(baseline$age), sd(baseline$memory), sd(baseline$ADAS11)),
+                           "Variance" = c(var(baseline$age), var(baseline$memory), var(baseline$ADAS11)),
+                           "Std Error" = c(std.error(baseline$age), std.error(baseline$memory), std.error(baseline$ADAS11)),
+                           "Inter-Quartile Range:" = c(IQR(baseline$age), IQR(baseline$memory), IQR(baseline$ADAS11)),
+                           "Minimum Value" = c(range(baseline$age)[1], range(baseline$memory)[1], range(baseline$ADAS11)[1]),
+                           "Maximum Value" = c(range(baseline$age)[2], range(baseline$memory)[2], range(baseline$ADAS11)[2]))
+
+baseline_sum <- format(round(baseline_sum, 2), nsmall = 2)
+rownames(baseline_sum) <- c("Age", "Memory Score", "ADAS11 Score")
+
+datatable(baseline_sum, caption = "General Summary of Baseline Data")
+```
+
+
+
+
+
+<font size="5"> 2) A table of how many participants have 1 time point of data, how many have 2 time points, how many have three, and so on </font> 
+
+```{r, message=FALSE}
+
+freq <- data.frame(data %>% group_by(id) %>% summarize(count=n()))
+
+count1 <- 0
+count2 <- 0
+count3 <- 0
+count4 <- 0
+
+
+for (i in freq$count) {
+  if (i == 1) {
+    count1 <- count1 + 1
+  }
+  else if (i == 2) {
+    count2 <- count2 + 1
+  }
+  else if (i == 3) {
+    count3 <- count3 + 1
+  }
+  else {
+    count4 <- count4 + 1
+  }
+}
+  
+timepoints <- data.frame("Number of Times Points" = sort(unique(freq$count)),
+                         "Number of Participants with the Corresponding Frequency" = c(count1, count2, count3, count4))
+
+datatable(timepoints)
+```
+
+<font size="5"> 3) A calculation of the mean and standard deviation of the maximum number of months each individual has had in the study </font>
+
+```{r, message=FALSE}
+max <- data.frame(data %>% group_by(id) %>% summarize(maximum = max(month, na.rm = TRUE)))
+
+maxmonths <- data.frame("Mean" = round(mean(max$maximum),2),
+                        "Standard Deviation" = round(sd(max$maximum),2))
+datatable(maxmonths)
+```
+
+<font size="5"> 4) A statistical comparison of the memory composite score by group at baseline </font>
+
+```{r}
+group0 <- data.frame(baseline %>% filter(grouptype==0) %>% select(memory))
+group1 <- data.frame(baseline %>% filter(grouptype==1) %>% select(memory))
+```
+
+Could we do an independent/unpaired t-test? 
+
+Is the data normally distributed?
+
+```{r}
+shapiro.test(group0$memory)
+shapiro.test(group1$memory)
+```
+
+From the output of both groups, the p-value > 0.05 implying that the distribution of the data are not significantly different from normal distribution. In other words, we can assume normality for each.
+
+
+How do the variances compare?
+```{r}
+var.test(group0$memory, group1$memory, alternative = "two.sided")
+```
+The ratio of variances is approx 1.
+
+Let's continue with independent/unpaired t-test
+
+```{r}
+t.test(group0$memory, group1$memory, var.equal = TRUE)
+```
+From the output, we have a t-value of t=-0.24627, degrees of freedom df=398, a p-value of p=0.8056, and a confidence interval of the mean at 95% of conf.int = [-0.7424181, 0.5771222]
+
+
+With a significance level of alpha=0.05 and p-value p=0.8056, we can conclude that there is no significance difference between the Active group's memory score and the Placebo group's memory score.
+
+
+<font size="5"> 5) A statistical comparison of the memory composite score by group AND sex at baseline </font>
+
+
+We perform ANOVA test: 
+
+```{r}
+# check the frequencies -- approximately a balanced design
+table(baseline$grouptype, baseline$female)
+
+# boxplots of features considered and interaction term
+boxplot(baseline$memory~baseline$grouptype)
+boxplot(baseline$memory~baseline$female)
+boxplot(baseline$memory~baseline$grouptype:baseline$female)
+```
+
+
+We can already see from these three boxplots that we have approximately equal means and variances across each comparison (grouptype, gender, and the interaction between grouptype and gender). We feel optimistic about the structure of our data to proceed with the ANOVA test.
+
+Next, we will check the interaction between grouptype and gender by looking at an interaction plot.
+
+```{r}
+interaction.plot(baseline$grouptype, baseline$female, baseline$memory)
+```
+
+There is not strict parallelism between these lines, indicating there may be some strength in the interaction between grouptype and gender.
+
+```{r}
+lin_model <- lm(baseline$memory ~ baseline$grouptype + baseline$female + baseline$grouptype:baseline$female)
+anova(lin_model)
+
+plot(lin_model$residuals)
+hist(lin_model$residuals)
+```
+
+From both the scatter plot and histogram, we can we that the residuals for this data are pretty symmetrically distributed, showing no general trend or pattern, which is desired. This reaffirms that a linear regression model is appropriate for the data.
+
+It is also important to point out that none of the factors (grouptype, gender, and the interaction between the two) are statistically significant. The factor grouptype has the highest p-value with p=0.80540. Just to be sure with our conclusion that none of the three considered factors make a difference in memory score, let’s perform another model, neglecting the insignificant grouptype factor.
+
+```{r}
+lin_model_2 <- lm(baseline$memory ~ baseline$female + baseline$grouptype:baseline$female)
+anova(lin_model_2)
+
+plot(lin_model_2$residuals)
+hist(lin_model_2$residuals)
+```
+
+Again, we see symmetry in the plots, and no statistical significance in the two factors considered. 
+
+
+<font size="5"> 6) A linear regression of the effect of group on ADAS11totscore at baseline after adjusting for age and sex </font>
+
+We run a linear regression model, the dependent variable being ADAS11 score and the independent variable being grouptype. Perhaps we have confounding factors (age and sex, as suggested) that we need to account for. We perform the following analysis:
+
+```{r}
+summary(lm(baseline$ADAS11 ~ baseline$grouptype + baseline$age + baseline$female))
+```
+
+We found the intercept to be (with a p-value of p=9.43e-06 < 0.05) 14.80882, and the parameter estimate for grouptype to be -0.64261 (with a p-value of p=0.353) suggesting that the Active group has a lower ADAS11 score by about 0.64 units.
+
+For age, the parameter estimate (with a p-value of p=0.127) of 0.06637, suggesting that one unit increase in age is associate with 0.06637 increase in ADAS11 score.
+
+Finally, for gender, we found a parameter estimate (with a p-value of p=0.728) of 0.24053. This means females have higher ADAS11 scores, by approximately 0.24053 units.
+
+Note, each factor considered (grouptype, age, and sex) does not have small enough p-values to be considered statistically significant. However, this does not imply these do not give relevance to the prediction of ADAS11 score.
+
+We have the following multiple linear regression function:
+
+```{r}
+# x = grouptype, 1 (active) or 0 (placebo)
+# y = age, any number (> 0)
+# z = sex, 1 (female) or 0 (male)
+
+ADAS11_score <- function(x,y,z) {
+  score <- 14.80882 - 0.64261*x + 0.06637*y + 0.24053*z
+  return(score)
+}
+
+```
+
+
+<font size="5"> 7) A linear mixed model that tests the influence of group on ADAS11totscore over time after adjusting for age and sex over time (with random effects) </font?=>
+– (i.e. longitudinal linear mixed effects model using nlme package)
+
+
+```{r, message=FALSE}
+library(nlme)
+
+lm_adas <- lme(ADAS11 ~ grouptype*month + age + female, random = ~1 | id/grouptype, data = data)
+
+summary(lm_adas)
+```
+
+
+```{r}
+anova(lm_adas)
+```
+
+<font size="3"> We can see that of the features considered above in predicing ADAS11 score, grouptype, month (time), and the interaction between grouptype and month pose as statistically significant factors. </font>
+
+
+
+
+<font size="6"> Interpretation: </font> 
+
+<font size="3"> 
+
+In the first part of our analysis, we concluded that there is no significance difference between the Active group's memory score and the Placebo group's memory score at baseline. Addiitonally, considering the memory composite score by group AND sex at baseline, there again was no signiicant different between Male Placebo, Male Active, Female Placebo, or Female Active in scores.
+
+We then found a linear regression model predicting ADAS11 score given a participants is in the Active of Placebo group. Finally, a linear mixed model was conducted to test the influence of group on ADAS11totscore over time, adjusting for age and sex over time. We found that whether a participant was part of the Active group or the Placebo group made a significant different in their ADAS11 score.
+
+Referring to the spaghetti plot below, it is pretty messy due to the amount of participants in the data. However, we do see a slight increase in ADAS11 score for participants over time. This shows that the longer the people participate in the study, they will tend to increase their ADAS11 score.
+
+
+</font>
+
+
+<font size="6"> Visualization: </font> 
+
+
+<font size="5"> 1) A spaghetti plot of ADAS11 scores per participant over time (all in one plot) </font> 
+
+```{r}
+library(ggplot2)
+p <- ggplot(data = data, aes(x = month, y = ADAS11, group = id))
+p + geom_line()
+```
+
+
+<font size="5"> 2) A box plot of baseline ADAS11 scores by group using ggplot </font> 
+
+```{r}
+p <- ggplot(data, aes(x=grouptype, y=ADAS11)) + 
+  geom_boxplot() + 
+  coord_flip()
+p
+```
+
+
+
+<font size="5"> 3) A visualization of the linear mixed model result of the fixed effect of group on the predicted values of ADAS11totscore over time </font> 
+
+
+```{r, message=FALSE}
+# (i.e. using plot_model function – to do this, you need to use type=c(’pred’), and set the terms option so that the x-axis is TIME and the y-axis is ADAS11totscore). DO NOT USE THE type=c(’est’) option.
+
+library(sjPlot)
+library(sjlabelled)
+library(sjmisc)
+library(ggplot2)
+
+theme_set(theme_sjplot())
+
+plot_model(lm_adas, type=c('pred'), terms = c('grouptype', 'month'))
+```
+
